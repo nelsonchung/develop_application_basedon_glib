@@ -6,18 +6,21 @@ CFLAGS = `pkg-config --cflags glib-2.0`
 LDFLAGS = `pkg-config --libs glib-2.0`
 
 # 目標執行檔
-TARGET = glist_example
+TARGETS = glist_example glist_example_person
 
 # 原始碼檔案
-SRCS = glist_example.c
+SRCS = glist_example.c glist_example_person.c
 
 # 物件檔案
 OBJS = $(SRCS:.c=.o)
 
 # 編譯規則
-all: $(TARGET)
+all: $(TARGETS)
 
-$(TARGET): $(OBJS)
+glist_example: glist_example.o
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+glist_example_person: glist_example_person.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
@@ -25,5 +28,5 @@ $(TARGET): $(OBJS)
 
 # 清理規則
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(TARGETS)
 
