@@ -14,8 +14,8 @@
  * 預期輸出：
  * 鍵 'banana' 對應的值為：香蕉
  *
- * @author: [您的姓名]
- * @date: [日期]
+ * @author: Nelson Chun 
+ * @date: 2024.11.22
  */
 
 #include <glib.h>   // 引入 GLib 函式庫的標頭檔案
