@@ -1,52 +1,70 @@
-/**
+ /**
  * @file glib_web_crawler.c
- * @brief A simple multithreaded web crawler using GLib.
+ * @brief A simple multithreaded web crawler supporting multiple websites using GLib.
  *
- * This program demonstrates how to use GLib to implement a basic multithreaded web crawler.
- * It fetches webpage content using libsoup, extracts URLs using GRegex, and processes them in multiple threads.
+ * This program demonstrates how to use GLib to implement a multithreaded web crawler
+ * capable of starting from multiple initial URLs and managing depth-limited crawling.
  *
- * Key Features:
- * - Fetch HTML content via HTTP GET requests using libsoup.
- * - Extract hyperlinks (href="...") from HTML using GRegex.
- * - Manage a queue of URLs with GQueue and ensure thread safety using GMutex.
- * - Use GThreadPool for concurrent HTTP requests.
+ * Features:
+ * - Concurrent crawling with GThreadPool.
+ * - URL deduplication using GHashTable.
+ * - Depth control to limit recursive crawling.
+ * - Resolving relative URLs to absolute URLs.
  *
  * Compilation:
  * gcc -o glib_web_crawler glib_web_crawler.c `pkg-config --cflags --libs glib-2.0 libsoup-2.4`
  *
  * Execution:
- * ./glib_web_crawler <start_url> [max_threads]
+ * ./glib_web_crawler <start_url1> [<start_url2> ...] [max_threads]
  *
  * Example:
- * ./glib_web_crawler https://example.com 10
- *
- * Notes:
- * - Enhancements like URL deduplication, depth limitation, or domain restriction can be added.
+ * ./glib_web_crawler https://example.com https://another.com 10
  *
  * @author: Nelson Chung
- * @date: 2024.11.23
- */
+ * @date: 2024.11.23*/
 
-#include <stdio.h>
 #include <glib.h>
 #include <libsoup/soup.h>
+#include <stdio.h>
+#include <stdlib.h> // For rand()
 
-// Queue for storing URLs to be crawled
+// Structure to represent a URL with its crawling depth
+typedef struct {
+    gchar *url;
+    int depth;
+} UrlItem;
+
+// URL queue, mutex, and visited URLs hash table
 GQueue *url_queue;
-// Mutex for synchronizing access to the URL queue
 GMutex queue_mutex;
-// Hash table to track visited URLs
 GHashTable *visited_urls;
-// Thread pool for concurrent crawling
+
+// Thread pool and depth limit
 GThreadPool *thread_pool;
+int max_depth = 3;
 
 /**
- * @brief Save content to a file for debugging or analysis.
+ * @brief Generate a unique filename for each URL.
  *
- * @param filename The name of the file.
+ * @param url The URL being saved.
+ * @return A dynamically allocated string containing the filename.
+ */
+gchar* generate_filename(const gchar *url) {
+    // Extract basename from URL and append a random number for uniqueness
+    gchar *basename = g_path_get_basename(url);
+    gchar *filename = g_strdup_printf("fetched_content_%s_%d.html", basename, rand());
+    g_free(basename);
+    return filename;
+}
+
+/**
+ * @brief Save content to a file with a unique name.
+ *
+ * @param url The URL of the content (used for generating the filename).
  * @param content The content to save.
  */
-void save_to_file(const gchar *filename, const gchar *content) {
+void save_to_file(const gchar *url, const gchar *content) {
+    gchar *filename = generate_filename(url);
     FILE *file = fopen(filename, "w");
     if (file) {
         fprintf(file, "%s", content);
@@ -55,6 +73,7 @@ void save_to_file(const gchar *filename, const gchar *content) {
     } else {
         g_printerr("Failed to save content to %s\n", filename);
     }
+    g_free(filename);
 }
 
 /**
@@ -74,12 +93,15 @@ gchar* resolve_url(const gchar *base_url, const gchar *relative_url) {
 }
 
 /**
- * @brief Extract URLs from HTML content using a regular expression.
+ * @brief Extract URLs from HTML content and add them to the queue.
  *
  * @param content The HTML content to scan.
  * @param base_url The base URL for resolving relative URLs.
+ * @param depth The current depth of crawling.
  */
-void extract_urls(const gchar *content, const gchar *base_url) {
+void extract_urls(const gchar *content, const gchar *base_url, int depth) {
+    if (depth >= max_depth) return;
+
     GRegex *regex = g_regex_new("href=[\"']?([^\"'>]+)", 0, 0, NULL);
     GMatchInfo *match_info;
 
@@ -87,16 +109,18 @@ void extract_urls(const gchar *content, const gchar *base_url) {
 
     while (g_match_info_matches(match_info)) {
         gchar *url = g_match_info_fetch(match_info, 1);
-
-        // Resolve relative URLs
         gchar *absolute_url = resolve_url(base_url, url);
 
-        // Add URL to the queue if not visited
         g_mutex_lock(&queue_mutex);
         if (!g_hash_table_contains(visited_urls, absolute_url)) {
             g_hash_table_add(visited_urls, g_strdup(absolute_url));
-            g_queue_push_tail(url_queue, g_strdup(absolute_url));
-            g_print("Discovered URL: %s\n", absolute_url);
+
+            UrlItem *item = g_new(UrlItem, 1);
+            item->url = g_strdup(absolute_url);
+            item->depth = depth + 1;
+
+            g_queue_push_tail(url_queue, item);
+            g_print("Discovered URL: %s (Depth: %d)\n", absolute_url, depth + 1);
         }
         g_mutex_unlock(&queue_mutex);
 
@@ -112,11 +136,14 @@ void extract_urls(const gchar *content, const gchar *base_url) {
 /**
  * @brief Fetch webpage content and process it.
  *
- * @param data The URL to fetch.
+ * @param data Pointer to UrlItem containing the URL and depth.
  */
 void fetch_url(gpointer data, gpointer user_data) {
-    gchar *url = (gchar *)data;
-    g_print("Fetching URL: %s\n", url);
+    UrlItem *item = (UrlItem *)data;
+    gchar *url = item->url;
+    int depth = item->depth;
+
+    g_print("Fetching URL: %s (Depth: %d)\n", url, depth);
 
     SoupSession *session = soup_session_new();
     SoupMessage *msg = soup_message_new("GET", url);
@@ -128,11 +155,11 @@ void fetch_url(gpointer data, gpointer user_data) {
 
         gchar *response = g_strdup(msg->response_body->data);
 
-        // Save content to a file (for debugging)
-        save_to_file("fetched_content.html", response);
+        // Save content to a unique file
+        save_to_file(url, response);
 
         // Extract URLs from the content
-        extract_urls(response, url);
+        extract_urls(response, url, depth);
 
         g_free(response);
     } else {
@@ -141,36 +168,45 @@ void fetch_url(gpointer data, gpointer user_data) {
 
     g_object_unref(msg);
     g_object_unref(session);
-    g_free(url);
+    g_free(item->url);
+    g_free(item);
 }
 
+
 /**
- * @brief Start the web crawler with the given URL and thread count.
+ * @brief Start the web crawler with the given URLs and thread count.
  *
- * @param start_url The initial URL to crawl.
- * @param max_threads The maximum number of threads.
+ * @param start_urls A NULL-terminated array of initial URLs.
+ * @param thread_count The maximum number of threads.
  */
-void start_crawler(const gchar *start_url, int max_threads) {
+void start_crawler(const gchar **start_urls, int thread_count) {
     url_queue = g_queue_new();
     g_mutex_init(&queue_mutex);
     visited_urls = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
-    // Add the initial URL to the queue
-    g_mutex_lock(&queue_mutex);
-    g_hash_table_add(visited_urls, g_strdup(start_url));
-    g_queue_push_tail(url_queue, g_strdup(start_url));
-    g_mutex_unlock(&queue_mutex);
+    // Add initial URLs to the queue
+    for (int i = 0; start_urls[i] != NULL; i++) {
+        g_mutex_lock(&queue_mutex);
+        g_hash_table_add(visited_urls, g_strdup(start_urls[i]));
+
+        UrlItem *item = g_new(UrlItem, 1);
+        item->url = g_strdup(start_urls[i]);
+        item->depth = 0;
+
+        g_queue_push_tail(url_queue, item);
+        g_mutex_unlock(&queue_mutex);
+    }
 
     // Initialize the thread pool
-    thread_pool = g_thread_pool_new(fetch_url, NULL, max_threads, FALSE, NULL);
+    thread_pool = g_thread_pool_new(fetch_url, NULL, thread_count, FALSE, NULL);
 
-    // Process the URL queue
+    // Process the queue
     while (!g_queue_is_empty(url_queue)) {
         g_mutex_lock(&queue_mutex);
-        gchar *url = g_queue_pop_head(url_queue);
+        UrlItem *item = g_queue_pop_head(url_queue);
         g_mutex_unlock(&queue_mutex);
 
-        g_thread_pool_push(thread_pool, url, NULL);
+        g_thread_pool_push(thread_pool, item, NULL);
     }
 
     // Wait for all threads to finish
@@ -183,16 +219,23 @@ void start_crawler(const gchar *start_url, int max_threads) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        g_print("Usage: %s <start_url> [max_threads]\n", argv[0]);
+        g_print("Usage: %s <start_url1> [<start_url2> ...] [max_threads]\n", argv[0]);
         return 1;
     }
 
-    const gchar *start_url = argv[1];
-    int max_threads = (argc > 2) ? atoi(argv[2]) : 5;
+    int thread_count = (argc > 2) ? atoi(argv[argc - 1]) : 5;
 
-    g_print("Starting crawler with %d threads...\n", max_threads);
-    start_crawler(start_url, max_threads);
+    // Create a NULL-terminated array of start URLs
+    const gchar **start_urls = (const gchar **)g_malloc((argc - 1) * sizeof(gchar *));
+    for (int i = 1; i < argc - 1; i++) {
+        start_urls[i - 1] = argv[i];
+    }
+    start_urls[argc - 2] = NULL;
+
+    g_print("Starting crawler with %d threads...\n", thread_count);
+    start_crawler(start_urls, thread_count);
     g_print("Crawling finished.\n");
 
+    g_free(start_urls);
     return 0;
 }
