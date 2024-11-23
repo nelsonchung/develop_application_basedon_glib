@@ -19,8 +19,8 @@
  * ...
  * 最終計數值：200000
  *
- * @author: [您的姓名]
- * @date: [日期]
+ * @author: Nelson Chung 
+ * @date: 2024.11.23
  */
 
 #include <glib.h>

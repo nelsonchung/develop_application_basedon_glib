@@ -17,8 +17,8 @@
  * 元素1
  * 元素2
  *
- * @author: [您的姓名]
- * @date: [日期]
+ * @author: Nelson Chung 
+ * @date: 2024.11.23
  */
 
 #include <glib.h>   // 引入 GLib 函式庫的標頭檔案
