@@ -1,3 +1,3 @@
 sudo apt-get update
 sudo apt-get install libglib2.0-dev
-
+sudo apt install -y libglib2.0-dev libsoup2.4-dev
