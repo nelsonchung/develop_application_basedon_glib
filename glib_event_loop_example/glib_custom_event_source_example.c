@@ -1,19 +1,19 @@
 /**
  * @file glib_custom_event_source_example.c
- * @brief Using GLib's event loop to handle custom event sources
+ * @brief 使用 GLib 的事件迴圈處理自訂事件來源的範例程式
  *
- * This program demonstrates how to use GLib's event loop mechanism to handle custom event sources.
- * It sets up a main event loop and a custom event source that triggers once per second.
- * When the event source triggers, a callback function is executed to print a message.
- * The event loop stops after the event source triggers five times.
+ * 此程式展示如何使用 GLib 的事件迴圈機制來處理自訂事件來源。
+ * 程式建立了一個主事件迴圈，以及一個自訂的事件來源，每秒觸發一次。
+ * 當事件來源觸發時，執行回呼函式並印出訊息。
+ * 當事件來源觸發五次後，結束事件迴圈。
  *
- * Compilation:
+ * 編譯方式：
  * gcc -o glib_custom_event_source_example glib_custom_event_source_example.c `pkg-config --cflags --libs glib-2.0`
  *
- * Execution:
+ * 執行方式：
  * ./glib_custom_event_source_example
  *
- * Expected Output:
+ * 預期輸出：
  * Custom event triggered: 1
  * Custom event triggered: 2
  * Custom event triggered: 3
@@ -29,70 +29,70 @@
 #include <stdio.h>
 #include <time.h>
 
-// Counter and main event loop pointer
+// 計數器和主事件迴圈指標
 static int counter = 0;
 static GMainLoop *main_loop = NULL;
 
-// Custom event source structure
+// 自訂事件來源的結構體
 typedef struct {
-    GSource source;
-    gint64 next_execution_time; // Next scheduled execution time in microseconds
-    int interval;               // Interval in milliseconds
+    GSource source;             // 基礎 GSource 結構
+    gint64 next_execution_time; // 下一次觸發的時間（以微秒為單位）
+    int interval;               // 事件間隔（以毫秒為單位）
 } CustomSource;
 
-// Callback for custom event source
+// 自訂事件來源的回呼函式
 gboolean custom_source_dispatch(GSource *source, GSourceFunc callback, gpointer user_data) {
     CustomSource *custom_source = (CustomSource *)source;
 
     counter++;
     g_print("Custom event triggered: %d\n", counter);
 
-    // Schedule the next execution time
+    // 設定下一次觸發時間
     custom_source->next_execution_time = g_get_monotonic_time() + (custom_source->interval * 1000);
 
     if (counter >= 5) {
         g_print("Custom event reached limit, exiting...\n");
         g_main_loop_quit(main_loop);
-        return FALSE; // Stop the event source
+        return FALSE; // 停止事件來源
     }
-    return TRUE; // Continue the event source
+    return TRUE; // 繼續事件來源
 }
 
-// Prepare function for the custom source
+// 自訂事件來源的準備函式
 gboolean custom_source_prepare(GSource *source, gint *timeout) {
     CustomSource *custom_source = (CustomSource *)source;
     gint64 current_time = g_get_monotonic_time();
 
     if (current_time >= custom_source->next_execution_time) {
-        *timeout = 0; // Ready to dispatch immediately
+        *timeout = 0; // 立即觸發事件
         return TRUE;
     }
 
-    // Calculate remaining time until the next execution
+    // 計算剩餘時間並設定為 timeout
     *timeout = (custom_source->next_execution_time - current_time) / 1000;
     return FALSE;
 }
 
-// Check function for the custom source
+// 自訂事件來源的檢查函式
 gboolean custom_source_check(GSource *source) {
     CustomSource *custom_source = (CustomSource *)source;
     gint64 current_time = g_get_monotonic_time();
 
-    // Check if the current time has reached the next execution time
+    // 確認是否已到下一次觸發時間
     return current_time >= custom_source->next_execution_time;
 }
 
-// Finalize function for the custom source
+// 自訂事件來源的結束函式
 void custom_source_finalize(GSource *source) {
     g_print("Custom source finalized.\n");
 }
 
 int main(int argc, char *argv[]) {
-    // Create the main event loop
+    // 建立主事件迴圈
     main_loop = g_main_loop_new(NULL, FALSE);
-    g_print("Main event loop created.\n");
+    g_print("主事件迴圈已建立。\n");
 
-    // Define custom event source function table
+    // 定義自訂事件來源的函式表
     GSourceFuncs custom_source_funcs = {
         .prepare = custom_source_prepare,
         .check = custom_source_check,
@@ -100,25 +100,25 @@ int main(int argc, char *argv[]) {
         .finalize = custom_source_finalize,
     };
 
-    // Create the custom event source
+    // 建立自訂事件來源
     CustomSource *custom_source = (CustomSource *)g_source_new(&custom_source_funcs, sizeof(CustomSource));
-    custom_source->interval = 1000; // Set interval to 1000 ms
+    custom_source->interval = 1000; // 設定事件間隔為 1000 毫秒
     custom_source->next_execution_time = g_get_monotonic_time() + (custom_source->interval * 1000);
-    g_print("Custom event source created.\n");
+    g_print("自訂事件來源已建立。\n");
 
-    // Attach the custom event source to the main event loop
+    // 將自訂事件來源加入主事件迴圈
     guint source_id = g_source_attach(&custom_source->source, NULL);
-    g_print("Custom event source attached successfully, Source ID: %u\n", source_id);
+    g_print("自訂事件來源已成功附加，Source ID: %u\n", source_id);
 
-    // Run the main event loop
-    g_print("Main event loop is running...\n");
+    // 啟動主事件迴圈
+    g_print("主事件迴圈開始運行...\n");
     g_main_loop_run(main_loop);
 
-    // Release resources
+    // 釋放資源
     g_source_unref(&custom_source->source);
-    g_print("Custom event source unreferenced.\n");
+    g_print("自訂事件來源的參考已解除。\n");
     g_main_loop_unref(main_loop);
-    g_print("Main event loop terminated.\n");
+    g_print("主事件迴圈已終止。\n");
 
     return 0;
 }
